@@ -3,31 +3,16 @@ on:
   schedule:
     - cron: '*/5 * * * *'  # Каждые 5 минут
   workflow_dispatch:  # Ручной запуск
-
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Check server status
+      - name: Ping Render
         run: |
-          # Текущее время (для логов)
-          echo "🕒 Проверка запущена: $(date '+%Y-%m-%d %H:%M:%S %Z')"
-          
-          # Пингуем сервер и получаем статус
-          URL="https://discord-birthday-bot.onrender.com"
-          RESPONSE_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$URL")
-          RESPONSE_TIME=$(curl -s -o /dev/null -w "%{time_total}s" "$URL")
-          
-          # Логируем результат
-          echo "🔗 URL: $URL"
-          echo "🔄 HTTP-код: $RESPONSE_CODE"
-          echo "⏱ Время ответа: $RESPONSE_TIME"
-          
-          if [ "$RESPONSE_CODE" -eq 200 ]; then
-            echo "✅ Сервер работает нормально"
-          else
-            echo "❌ Ошибка: сервер вернул $RESPONSE_CODE"
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" https://your-bot-name.onrender.com)
+          if [ "$RESPONSE" -ne 200 ]; then
+            echo "❌ Ошибка: сервер вернул $RESPONSE"
             exit 1
+          else
+            echo "✅ Сервер активен (HTTP $RESPONSE)"
           fi
-          
-          echo "♻️ Проверка завершена в $(date '+%H:%M:%S')"
