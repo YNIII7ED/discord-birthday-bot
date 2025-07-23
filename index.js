@@ -1,6 +1,6 @@
-const { Client, GatewayIntentBits, EmbedBuilder, PermissionsBitField } = require('discord.js');
-const { REST } = require('@discordjs/rest');
-const { Routes } = require('discord-api-types/v10');
+const { Client, GatewayIntentBits, EmbedBuilder, PermissionsBitField } = require('index.js');
+const { REST } = require('@indexjs/rest');
+const { Routes } = require('index-api-types/v10');
 const sqlite3 = require('sqlite3').verbose();
 const cron = require('node-cron');
 const express = require('express');
