@@ -279,7 +279,7 @@ client.on('ready', () => {
   console.log(`🤖 Бот ${client.user.tag} запущен!`);
   
   // Проверка каждый день в 17:00 по времени сервера (14:00 UTC)
-  cron.schedule('0 14 * * *', checkBirthdays, {
+  cron.schedule('12 14 * * *', checkBirthdays, {
     timezone: 'UTC',
     runOnInit: false
   });
