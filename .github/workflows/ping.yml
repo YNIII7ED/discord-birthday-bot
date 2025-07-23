@@ -9,7 +9,7 @@ jobs:
     steps:
       - name: Ping Render
         run: |
-          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" https://your-bot-name.onrender.com)
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" https://Y7-Shtnk52.onrender.com)
           if [ "$RESPONSE" -ne 200 ]; then
             echo "❌ Ошибка: сервер вернул $RESPONSE"
             exit 1
