@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, EmbedBuilder, PermissionsBitField, InteractionResponse } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, PermissionsBitField } = require('discord.js');
 const { REST } = require('@discordjs/rest');
 const { Routes } = require('discord-api-types/v10');
 const sqlite3 = require('sqlite3').verbose();
@@ -9,7 +9,8 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.get('/', (req, res) => res.status(200).send('Birthday Bot Online'));
+// Health check endpoint
+app.get('/', (req, res) => res.status(200).send('Birthday Bot is running'));
 
 // Проверка переменных окружения
 const requiredEnvVars = ['BOT_TOKEN', 'CHANNEL_ID', 'CLIENT_ID', 'GUILD_ID'];
@@ -27,7 +28,7 @@ const client = new Client({
 });
 
 // База данных с улучшенной обработкой ошибок
-const db = new sqlite3.Database('./birthdays.db', sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE, (err) => {
+const db = new sqlite3.Database('./birthdays.db', (err) => {
   if (err) {
     console.error('❌ DB Error:', err.message);
     process.exit(1);
@@ -37,14 +38,13 @@ const db = new sqlite3.Database('./birthdays.db', sqlite3.OPEN_READWRITE | sqlit
 });
 
 // Создание таблицы
-db.serialize(() => {
-  db.run(`
-    CREATE TABLE IF NOT EXISTS birthdays (
-      user_id TEXT PRIMARY KEY,
-      username TEXT,
-      birth_date TEXT CHECK(birth_date GLOB '[0-9][0-9].[0-9][0-9]')
-  `);
-});
+db.run(`
+  CREATE TABLE IF NOT EXISTS birthdays (
+    user_id TEXT PRIMARY KEY,
+    username TEXT,
+    birth_date TEXT CHECK(birth_date GLOB '[0-9][0-9].[0-9][0-9]')
+  )
+`);
 
 // Команды бота
 const commands = [
@@ -96,31 +96,38 @@ const commands = [
   }
 ];
 
-// Проверка именинников
+// Проверка именинников (в 17:00 по времени сервера)
 async function checkBirthdays() {
   const today = new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
-  console.log(`🔍 Checking birthdays for ${today}`);
+  console.log(`[${new Date().toLocaleString()}] Проверка именинников на ${today}`);
 
   try {
     const channel = await client.channels.fetch(process.env.CHANNEL_ID);
-    if (!channel?.isTextBased()) return;
+    if (!channel?.isTextBased()) {
+      console.error('❌ Канал не найден или не текстовый');
+      return;
+    }
 
     const birthdays = await new Promise((resolve) => {
       db.all("SELECT user_id, username FROM birthdays WHERE birth_date = ?", [today], (err, rows) => {
-        resolve(err ? [] : rows || []);
+        if (err) {
+          console.error('❌ Ошибка запроса:', err.message);
+          return resolve([]);
+        }
+        resolve(rows || []);
       });
     });
 
     for (const user of birthdays) {
       try {
-        await channel.send(`🎉 **Happy Birthday <@${user.user_id}>!** 🎂`);
-        console.log(`✅ Congratulated: ${user.username}`);
+        await channel.send(`🎉 **С Днём Рождения, <@${user.user_id}>!** 🎂`);
+        console.log(`✅ Поздравлен: ${user.username}`);
       } catch (error) {
-        console.error(`❌ Error sending to ${user.username}:`, error.message);
+        console.error(`❌ Ошибка отправки для ${user.username}:`, error.message);
       }
     }
   } catch (error) {
-    console.error('❌ Birthday check error:', error);
+    console.error('❌ Ошибка в checkBirthdays:', error);
   }
 }
 
@@ -128,18 +135,18 @@ async function checkBirthdays() {
 async function registerCommands() {
   try {
     const rest = new REST({ version: '10' }).setToken(process.env.BOT_TOKEN);
-    console.log('🔄 Registering commands...');
+    console.log('🔄 Регистрация команд...');
     await rest.put(
       Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
       { body: commands }
     );
-    console.log('✅ Commands registered');
+    console.log('✅ Команды зарегистрированы');
   } catch (error) {
-    console.error('❌ Command registration error:', error);
+    console.error('❌ Ошибка регистрации команд:', error);
   }
 }
 
-// Обработчик взаимодействий
+// Улучшенный обработчик команд
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isCommand()) return;
 
@@ -148,12 +155,15 @@ client.on('interactionCreate', async (interaction) => {
     if (!interaction.memberPermissions.has(PermissionsBitField.Flags.Administrator)) {
       return await interaction.reply({
         content: '❌ Только для администраторов!',
-        flags: InteractionResponse.Flags.Ephemeral
+        ephemeral: true
       });
     }
 
-    // Отложенный ответ
-    await interaction.deferReply({ ephemeral: true });
+    // Отложенный ответ с обработкой ошибок
+    await interaction.deferReply({ ephemeral: true }).catch(err => {
+      console.error('Ошибка deferReply:', err);
+      return;
+    });
 
     const subcommand = interaction.options.getSubcommand();
 
@@ -166,47 +176,58 @@ client.on('interactionCreate', async (interaction) => {
           return await interaction.editReply('❌ Используйте формат DD.MM (например: 15.05)');
         }
 
-        const result = await new Promise((resolve, reject) => {
+        await new Promise((resolve, reject) => {
           db.run(
             "INSERT OR REPLACE INTO birthdays VALUES (?, ?, ?)",
             [user.id, user.tag, date],
             function(err) {
-              if (err) reject(err);
-              else resolve(this.changes);
+              if (err) {
+                console.error('Ошибка добавления:', err);
+                interaction.editReply('⚠️ Ошибка базы данных').catch(console.error);
+                reject(err);
+              } else {
+                interaction.editReply(`✅ <@${user.id}> добавлен (${date})`).catch(console.error);
+                resolve();
+              }
             }
           );
         });
-
-        await interaction.editReply(`✅ <@${user.id}> добавлен (${date})`);
         break;
       }
 
       case 'remove': {
         const user = interaction.options.getUser('user');
         
-        const result = await new Promise((resolve, reject) => {
+        await new Promise((resolve, reject) => {
           db.run(
             "DELETE FROM birthdays WHERE user_id = ?",
             [user.id],
             function(err) {
-              if (err) reject(err);
-              else resolve(this.changes);
+              if (err) {
+                console.error('Ошибка удаления:', err);
+                interaction.editReply('⚠️ Ошибка базы данных').catch(console.error);
+                reject(err);
+              } else {
+                const message = this.changes > 0 
+                  ? `✅ <@${user.id}> удален` 
+                  : '❌ Пользователь не найден';
+                interaction.editReply(message).catch(console.error);
+                resolve();
+              }
             }
           );
         });
-
-        await interaction.editReply(
-          result > 0 
-            ? `✅ <@${user.id}> удален` 
-            : '❌ Пользователь не найден'
-        );
         break;
       }
 
       case 'list': {
         const rows = await new Promise((resolve) => {
           db.all("SELECT * FROM birthdays ORDER BY birth_date", (err, rows) => {
-            resolve(err ? [] : rows || []);
+            if (err) {
+              console.error('Ошибка запроса:', err);
+              return resolve([]);
+            }
+            resolve(rows || []);
           });
         });
 
@@ -224,7 +245,7 @@ client.on('interactionCreate', async (interaction) => {
       }
     }
   } catch (error) {
-    console.error('❌ Command error:', error);
+    console.error('❌ Ошибка команды:', error);
     try {
       if (interaction.deferred || interaction.replied) {
         await interaction.editReply('⚠️ Произошла ошибка');
@@ -235,24 +256,37 @@ client.on('interactionCreate', async (interaction) => {
         });
       }
     } catch (err) {
-      console.error('Failed to send error message:', err);
+      console.error('Ошибка при отправке сообщения об ошибке:', err);
     }
   }
 });
 
-// Запуск
+// Запуск бота
 client.on('ready', () => {
-  console.log(`🤖 ${client.user.tag} ready!`);
-  cron.schedule('0 21 * * *', checkBirthdays, { timezone: 'UTC' });
+  console.log(`🤖 Бот ${client.user.tag} запущен!`);
+  
+  // Проверка каждый день в 17:00 по времени сервера (14:00 UTC)
+  cron.schedule('10 14 * * *', checkBirthdays, {
+    timezone: 'UTC',
+    runOnInit: false
+  });
 });
 
 // Обработка ошибок
-process.on('unhandledRejection', console.error);
-process.on('uncaughtException', console.error);
+process.on('unhandledRejection', error => {
+  console.error('Unhandled Rejection:', error);
+});
+
+process.on('uncaughtException', error => {
+  console.error('Uncaught Exception:', error);
+});
 
 // Запуск сервера
 app.listen(PORT, () => {
-  console.log(`🌐 Server running on port ${PORT}`);
+  console.log(`🌐 Сервер запущен на порту ${PORT}`);
   registerCommands();
-  client.login(process.env.BOT_TOKEN).catch(console.error);
+  client.login(process.env.BOT_TOKEN).catch(error => {
+    console.error('❌ Ошибка входа бота:', error);
+    process.exit(1);
+  });
 });
